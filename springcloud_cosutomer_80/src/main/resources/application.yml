@@ -1,0 +1,14 @@
+server:
+  port: 80
+  
+
+
+eureka:
+  client:
+    register-with-eureka: false  #禁止自己注册成服务，因此，虽然是Eureka的客户端，但是不可见，默认为true
+    service-url:
+      defaultZone: http://eureka7001.com:7001/eureka/,http://eureka7002.com:7002/eureka/
+
+    #注册进Eureka集群
+
+#消费端

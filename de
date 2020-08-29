@@ -1,0 +1,255 @@
+eureka 包含两个组件， eureka Server和 eureka Client
+各个节点启动后，会在eureka server中注册，这样eureka server的服务注册表中会存储所有可用服务节点的信息，服务节点的信息可以在界面中直观的看到
+
+eureka client 是一个java客户端，用于简化eureka server的交互，客户端同时也具备一个内置，使用轮询(roubd-robin)负载算法的负载均衡器，在启动后，
+会向eureka server发送心跳(默认周期30秒)，如果eureks server在多个心跳周期内没有接收到某个节点的心跳，eureka server将会从服务注册表中把该服务移除(默认90秒)
+
+
+当服务端注册到Eureka后，服务名称是可以点击的，默认访问的是info,但是访问后是error page,因此要做一些配置
+相当于是微服务的说明，
+  1. 在需要的服务里添加坐标，目前项目，8001端口所在的项目需要添加
+     <!-- actuator监控信息完善 -->
+     		<dependency>
+     			<groupId>org.springframework.boot</groupId>
+     			<artifactId>spring-boot-starter-actuator</artifactId>
+     		</dependency>
+
+   2.父工程则需要添加插件，来支持
+   3.最后在子项目8001的yml文件处添加如下信息
+     info:
+       app.name: microservicecloud-dept
+       company.name: com.sz
+       build.artifactId: $project.artifactId$
+       build.version: $project.version$
+       这是属于自身服务描述，自定义
+
+
+ Eureka的自我保护机制，
+   当注册进Eureka的微服务，在规定的时间内，没有被访问，Eureka不会删除该微服务实例，而是会保存，也就是进入了自我保护
+   当该微服务重新获得心跳，eureka接收到了心跳，则会退出自我保护，（默认时间90秒）
+
+
+   服务暴露
+     让注册在Eureka的微服务可以被其他服务访问，也就是 暴露出来
+     在8001服务的启动类上加上该注释
+     @EnableDiscoveryClient// 服务发现
+
+     然后我们在服务提供方的controller哪里自己先调用一下自己的数据
+     首先注入一个成员属性
+      @Autowired
+         private DiscoveryClient client;
+
+      然后提供一个方法调用
+        @RequestMapping(value = "/discovery")
+          @ResponseBody
+          public Object discovery()
+          {
+              List<String> list = client.getServices();
+              System.out.println("**********" + list);
+
+              List<ServiceInstance> srvList = client.getInstances("microservicecloud-dept");//查询又没有这个名称的微服务
+              for (ServiceInstance element : srvList) {
+                  System.out.println(element.getServiceId() + "\t" + element.getHost() + "\t" + element.getPort() + "\t"
+                          + element.getUri());
+              }  //打印服务名称，地址，端口，链接
+              return this.client;
+          }
+          根据个人来打印
+
+          当然，这是服务提供方自己调自己的信息，服务发现，我们应该要让消费端的服务也能够调用
+          在当前demo中，80端口服务是充当了一个服务消费端
+          在他的Cotroller里面
+          我们也提供一个方法来调用，注意，这是直接调用的消费方法controller的方法
+            @ResponseBody
+              @RequestMapping("/dep")
+              public Object dep(){
+                  return restTemplate.getForObject(PROVIDE_HTTP+"/admin/discovery", Object.class);
+              }
+
+
+
+     eureka集群
+
+       由于eureka是主管服务注册和发现的，部署在一台服务器上，但是当该服务宕机是，所有的注册服务都不能使用
+       因此，我们需要配置eureka的集群，当其中一个服务宕机后，而不会影响使用
+
+       之前单个的eureka的配置的名称都是localhost,当然集群之后也是可以继续用的，但是不好分辨
+       于是我们需要修改一下映射文件
+
+      C:\Windows\System32\drivers\etc\hosts.ics文件
+      添加域名映射
+       127.0.0.1  eureka7001.com
+       127.0.0.1  eureka7002.com
+
+       两个映射，这里举例，使用两个eureka服务
+
+       当eureka集群弄好后，那么我们的服务提供方之前只在一个服务上注册，现在不知一个注册中心了，
+       所以，我们需要在每一个服务注册中心注册，此案例的服务提供方是8001端口所在项目
+
+         8001配置文件
+         单机版
+          eureka:
+            client: #客户端注册进eureka服务列表内
+              service-url:
+                defaultZone: http://localhost:7001/eureka/   #Eureka的地址
+            集群环境下，
+
+
+本案例配置的是集群环境
+
+          传统的关系型数据库的ACID
+          ACID :  A  Atomicity  原子性
+                  C  Consistency 一致性
+                  I  Isolation 独立性
+                  D  Durability 持久性
+
+           NoSql ：非关系型数据库，如Reads
+              CAP:
+                C Consistency  强一致性
+                A Availability  可用性
+                P Partition tolerance  分区容错性
+
+     CAP理论的核心是：
+       一个分布式系统不可能同时很好的满足一致性，可用性和分区容错性这三个需求，最多只能同时较好的满足两个。
+       因此，根据 CAP 原理将 NoSQL 数据库分成了满足 CA 原则、满足 CP 原则和满足 AP 原则三 大类：
+           CA - 单点集群，满足一致性，可用性的系统，通常在可扩展性上不太强大
+           CP - 满足一致性，分区容忍性的系统，通常性能不是特别高
+           AP - 满足可用性，分区容忍性的系统，通常可能对一致性要求低一些。
+
+
+       Zookeeper也是服务注册中心
+        Zookeeper保证的是cp ,eureka保证的是ap
+        也就是说Zookeeper保证的是强一致性和容错性，当主节点宕机后，服务会瘫痪，导致服务注册不可用
+        但是保证了强一致性，而eureka则是当注册的微服务宕机后，依然保留，不会清楚已经注册的服务，
+        只要还有一个注册中心，就可以继续使用，
+
+-------------
+
+   Ribbon 负载均衡
+
+    是基于Netflix Ribbon实现的一套客户端的负载均衡工具
+
+    提供了一系列完善的配置项如连接超时，重试等，就是在配置文件中列出Load Balancer后面所有的机器，
+    Ribbon会自动的帮助你基于某种规则，如简单轮询，随机连接去练级
+
+     由于Ribbon是一款客户端的工具，因此，我们的负载均衡是加载客户端，
+     在我们的这个demo中是80端口所在的服务
+     在该项目下添加相应的Ribbon坐标
+
+
+     然后将我们的消费端在启动类上加上注解
+     EnableEurekaClient  标注Eureka的客户端
+     yml配置文件不在是单单的端口号，而是配置了访问eureka集群的地址，可以访问注册在该集群里的微服务
+     在该项目的
+        Config类里需要加上
+          @LoadBalanced的注解
+          加载返回的RestTemplate，使之有负载均衡的能力
+
+          然后在Controller的控制层中，将原本直接访问服务提供方的路径换成在服务注册中心显示的微服务名称
+          (一般显示的名称就是该服务暴露出来的名称)
+
+
+
+------------------------
+
+   多个服务消费端+Ribbon负载均衡+Eureka集群
+    在之前的基础上，我们现在就差多个消费端了，我们这个例子就多添加一个提供方服务
+    8002，配置和8001是一样的，
+    但是，注意，不能修改服务对外暴露的服务名，必须要相同
+
+    8001服务和8002服务所连接的数据库不一样，也就是说他们是独立开来的
+    但是他们的表结构是一样的
+    当我们使用80消费端服务去访问数据时，每一次刷新都会返回和本次不同的数据
+    这就是Ribbon的默认的轮询算法，就是挨个的访问服务提供方，8001,8002
+
+     自带的7种算法：
+        RoundRobinRule                 轮询
+        RandomRule                     随机
+        AvailabilityFilteringRule     会先过滤掉由于多次访问呢故障而处于断路器跳闸状态的服务，还有并发的连接数量超过阈值的服务
+                                        然后对于剩余的服务列表按照轮询策略进行访问
+
+        WeightedResponseTimeRule   根据平均响应时间计算所有服务的权重，响应时间越快服务权重越大被选中的概率越高，
+                                   刚启动是如果统计信息不足，则使用  轮询  策略，等统计信息足够时，会切换到该种策略
+
+        RetryRule       先按照  轮询  策略 获取服务，如果获取失败则在指定时间内进行重试，获取可用的服务，
+                         如果持续不能获取到该服务，则在某个下次轮询时自动跳过该服务
+
+        BastAvailableRule    会先过滤掉由于多次访问故障而处于断路器跳闸状态的服务，然后选择一个并发量最小的服务
+
+
+        ZonAvoidanceRule      默认规则，复合判断server所在区域的性能和server的可用性选择服务器
+
+        默认是轮询，可修改，在服务的消费端的配置类里面配置一个IRule类
+        如
+                改为随机算法
+              @Bean
+              public IRule getIrule(){
+                  return new RandomRule();   //改成其他的方式就可以直接new上面的那么几种算法
+              }
+
+
+     自定义负载均衡算法
+     首先创建一个配置类，该类的不能是在使用了@ComponentScan的包下或及其子包下，
+     注意@SpringBootApplication包含了该注解
+     为什么不能放在该注解所在的包及其子包下
+
+     因为这样会被所有的Ribbon客户端所共享，也就是说达不到我们特殊化定制的目的
+
+     注意，需要在客户端创建，因为ribbon是对客户端进行负载均衡的工具
+
+        @Configuration
+        public class MyRibbon {
+
+            @Bean
+            public IRule myIrule(){
+                return new RandomRule();   //随机
+            }
+
+        }
+        配置类
+
+        然后需要在服务的客户端启动类上使用注解
+        @RibbonClient(value = "microservicecloud-dept",configuration = MyRibbon.class)
+        表示将会使用我们自定义的策略
+
+        真正的自定义策略  ，该案例使用的是轮询，但是每个微服务访问5次的这么一个策略
+
+         该案例的自定义策略
+             MyRibbonRule.java
+             实现自己的策略，我们只需要在他原有的一些策略算法中，复制大部分代码，然后进行小幅度的修改
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
